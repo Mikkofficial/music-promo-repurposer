@@ -33,7 +33,7 @@ You only need to do this once. No business verification or company registration 
    * Click **Generate Access Token**, approve your Facebook Page and Instagram account in the popup, then click the blue **`i` icon** next to the token → **Open in Access Token Tool → Extend Access Token** to get your 60-day token.
 4. **Grab Your Permanent Page Token & IDs:**
    * Open this URL in your browser (replace `YOUR_60_DAY_TOKEN`):
-     `https://facebook.com`
+     `https://graph.facebook.com/v21.0/me/accounts?fields=name,access_token,instagram_business_account&access_token=YOUR_60_DAY_TOKEN`
    * Save these three values from the response:
      * **`access_token`** (nested under your Facebook Page name — this Page Token does not expire)
      * **`id`** inside `instagram_business_account` (starts with `178414...` — your **Instagram Business ID**)
