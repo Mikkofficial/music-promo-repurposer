@@ -1,0 +1,373 @@
+{
+  "name": "Music Promo Multi-Platform Repurposer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "11111111-1111-4111-8111-111111111101",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "command": "USER=\"{{ $env.TIKTOK_USERNAME }}\"\nrm -f /home/node/.n8n-files/latest_tiktok.*\n/usr/local/bin/yt-dlp --playlist-end 8 --dateafter now-1day --max-downloads 1 --download-archive /home/node/.n8n/tiktok_history.txt --write-info-json -f \"bv*[vcodec^=avc1]+ba[ext=m4a]/b[vcodec^=avc1]/b[ext=mp4]\" --merge-output-format mp4 -o \"/home/node/.n8n-files/latest_tiktok.%(ext)s\" \"https://www.tiktok.com/@$USER\" || true\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        220,
+        0
+      ],
+      "id": "11111111-1111-4111-8111-111111111102",
+      "name": "Download Latest TikTok"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-new-video",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "Destination: /home/node/.n8n-files/latest_tiktok.mp4",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "id": "11111111-1111-4111-8111-111111111103",
+      "name": "New Video Found?"
+    },
+    {
+      "parameters": {
+        "command": "node -e 'const d=require(\"/home/node/.n8n-files/latest_tiktok.info.json\"); console.log(JSON.stringify({title:(d.title||\"New Music\").slice(0,95), desc:d.description||\"\"}))'\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        680,
+        -120
+      ],
+      "id": "11111111-1111-4111-8111-111111111104",
+      "name": "Read Caption"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/latest_tiktok.mp4",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        900,
+        -240
+      ],
+      "id": "11111111-1111-4111-8111-111111111105",
+      "name": "Load MP4 for YouTube"
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ JSON.parse($('Read Caption').item.json.stdout).title || 'New Music Short' }}",
+        "regionCode": "DE",
+        "categoryId": "10",
+        "binaryPropertyName": "data",
+        "options": {
+          "description": "={{ JSON.parse($('Read Caption').item.json.stdout).desc || 'New Music!' }}",
+          "privacyStatus": "public"
+        }
+      },
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        -240
+      ],
+      "id": "11111111-1111-4111-8111-111111111106",
+      "name": "YouTube Shorts Upload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $env.IG_BUSINESS_ID }}/media",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  media_type: \"REELS\",\n  video_url: \"https://\" + $env.DOMAIN + \"/webhook/latest-tiktok-video\",\n  caption: JSON.parse($('Read Caption').item.json.stdout).desc || \"New Music!\",\n  trial_params: {\n    graduation_strategy: \"SS_PERFORMANCE\"\n  },\n  access_token: $env.META_PAGE_TOKEN\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        -20
+      ],
+      "id": "11111111-1111-4111-8111-111111111107",
+      "name": "IG Create Trial Reel"
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1140,
+        -20
+      ],
+      "id": "11111111-1111-4111-8111-111111111108",
+      "name": "Wait 60s for IG Processing",
+      "webhookId": "22222222-2222-4222-8222-222222222201"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $env.IG_BUSINESS_ID }}/media_publish",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "creation_id",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_PAGE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        -20
+      ],
+      "id": "11111111-1111-4111-8111-111111111109",
+      "name": "IG Publish Trial Reel"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph-video.facebook.com/v21.0/{{ $env.FB_PAGE_ID }}/videos",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_url",
+              "value": "={{ 'https://' + $env.DOMAIN + '/webhook/latest-tiktok-video' }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ JSON.parse($('Read Caption').item.json.stdout).desc || 'New Music!' }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_PAGE_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        180
+      ],
+      "id": "11111111-1111-4111-8111-111111111110",
+      "name": "FB Page Reel Upload"
+    },
+    {
+      "parameters": {
+        "path": "latest-tiktok-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        360
+      ],
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "Public Video Host Webhook",
+      "webhookId": "33333333-3333-4333-8333-333333333301"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/latest_tiktok.mp4",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        220,
+        360
+      ],
+      "id": "11111111-1111-4111-8111-111111111112",
+      "name": "Read MP4 for Meta"
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        360
+      ],
+      "id": "11111111-1111-4111-8111-111111111113",
+      "name": "Serve MP4 to IG & FB"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Download Latest TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Latest TikTok": {
+      "main": [
+        [
+          {
+            "node": "New Video Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Video Found?": {
+      "main": [
+        [
+          {
+            "node": "Read Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Caption": {
+      "main": [
+        [
+          {
+            "node": "Load MP4 for YouTube",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IG Create Trial Reel",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FB Page Reel Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load MP4 for YouTube": {
+      "main": [
+        [
+          {
+            "node": "YouTube Shorts Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IG Create Trial Reel": {
+      "main": [
+        [
+          {
+            "node": "Wait 60s for IG Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 60s for IG Processing": {
+      "main": [
+        [
+          {
+            "node": "IG Publish Trial Reel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Public Video Host Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read MP4 for Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read MP4 for Meta": {
+      "main": [
+        [
+          {
+            "node": "Serve MP4 to IG & FB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

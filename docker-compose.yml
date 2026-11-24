@@ -1,0 +1,41 @@
+services:
+  n8n:
+    build: .
+    container_name: music-repurposer-n8n
+    restart: unless-stopped
+    environment:
+      - N8N_HOST=${DOMAIN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://${DOMAIN}/
+      - N8N_EDITOR_BASE_URL=https://${DOMAIN}/
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - GENERIC_TIMEZONE=${TIMEZONE:-Europe/Berlin}
+      - DOMAIN=${DOMAIN}
+      - TIKTOK_USERNAME=${TIKTOK_USERNAME}
+      - IG_BUSINESS_ID=${IG_BUSINESS_ID}
+      - FB_PAGE_ID=${FB_PAGE_ID}
+      - META_PAGE_TOKEN=${META_PAGE_TOKEN}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - n8n_files:/home/node/.n8n-files
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: music-repurposer-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command: caddy reverse-proxy --from ${DOMAIN} --to n8n:5678
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - n8n
+
+volumes:
+  n8n_data:
+  n8n_files:
+  caddy_data:
+  caddy_config:
