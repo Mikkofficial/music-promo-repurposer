@@ -10,7 +10,7 @@ Post once to TikTok and automatically share your clips to **YouTube Shorts**, **
 * **Best for:** Running straight from your laptop with zero servers or domains.
 * **Cost:** Free ($0)
 * **Schedule:** Checks your TikTok whenever your laptop is awake.
-* **Get started:** Grab the installer from **[Latest Releases](https://github.com)** and read the **[Desktop Setup Guide](windows-app/README.md)**.
+* **Get started:** Grab the installer from **[Latest Releases](https://github.com/Mikkofficial/music-promo-repurposer/releases)** and read the **[Desktop Setup Guide](windows-app/README.md)**.
 
 ### 2. Cloud or Home Server — Always On (24/7)
 * **Best for:** Hands-free background posting on a mini PC or budget VPS.
