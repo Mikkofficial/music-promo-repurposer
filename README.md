@@ -1,20 +1,26 @@
 # Music Promo Repurposer
 
-**Automatically crosspost your TikToks to YouTube Shorts, Instagram Trial Reels, and your Facebook Page — with zero watermarks and zero monthly subscription fees.**
-
-Built for independent music artists who want maximum reach across all short-form platforms without paying $30–$100/month for third-party scheduling tools.
+Post once to TikTok and automatically share your clips to **YouTube Shorts**, **Instagram Trial Reels**, and your **Facebook Page** — without watermarks or recurring software subscriptions.
 
 ---
 
-## Choose Your Setup
+## Pick Your Setup Method
 
-| Option | Best For | Cost | Runs 24/7? |
-| :--- | :--- | :--- | :--- |
-| **[1. Desktop App (Windows & macOS)](./windows-app/README.md)** | Easiest setup — runs directly on your laptop | **$0** (no server or domain needed) | While your laptop is awake |
-| **[2. 24/7 Server Setup (Home Server or VPS)](./server/README.md)** | Hands-free 24/7 automation in the cloud or on a mini PC | **$0/mo** (home) or **~$5/mo** (VPS) | **Yes (24/7)** |
+### 1. Desktop App (Windows & macOS) — Easiest
+* **Best for:** Running straight from your laptop with zero servers or domains.
+* **Cost:** Free ($0)
+* **Schedule:** Checks your TikTok whenever your laptop is awake.
+* **Get started:** Grab the installer from **[Latest Releases](https://github.com)** and read the **[Desktop Setup Guide](windows-app/README.md)**.
+
+### 2. Cloud or Home Server — Always On (24/7)
+* **Best for:** Hands-free background posting on a mini PC or budget VPS.
+* **Cost:** $0/month at home or ~$5/month on a cloud server.
+* **Schedule:** Runs continuously 24/7.
+* **Get started:** Follow the **[Server Setup Guide](server/README.md)**.
 
 ---
 
-### Quick Start Links
-* **Windows & Mac Users:** Download the latest installer from **[Releases](https://github.com/YOUR_GITHUB_USERNAME/music-promo-repurposer/releases/latest)** and follow the **[Desktop App Setup Guide](./windows-app/README.md)**.
-* **Server / VPS Users:** Follow the **[1-Command Server Guide](./server/README.md)**.
+## Included Features
+* **Watermark-Free H.264 + AAC:** Grabs top-quality video and audio streams.
+* **Separate Platform Analytics:** Uploads directly to each network so views stay tracked per platform.
+* **Instagram Trial Reels:** Tests clips with non-followers before pushing winners to your grid.
