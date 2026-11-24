@@ -1,30 +1,26 @@
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import threading
 import time
-from functools import partial
+import urllib.parse
+from datetime import datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+import imageio_ffmpeg
 import requests
 import yt_dlp
-
-try:
-    import imageio_ffmpeg
-except ImportError:
-    imageio_ffmpeg = None
 
 try:
     import pystray
     from PIL import Image, ImageDraw
     HAS_TRAY = True
-except ImportError:
+except Exception:
     HAS_TRAY = False
 
 try:
@@ -34,635 +30,409 @@ try:
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
     HAS_GOOGLE = True
-except ImportError:
+except Exception:
     HAS_GOOGLE = False
 
 APP_DIR = Path.home() / "MusicPromoRepurposer"
-TEMP_DIR = APP_DIR / "temp"
+APP_DIR.mkdir(parents=True, exist_ok=True)
+
 CONFIG_FILE = APP_DIR / "config.json"
-ARCHIVE_FILE = APP_DIR / "tiktok_history.txt"
+HISTORY_FILE = APP_DIR / "tiktok_history.txt"
 YT_TOKEN_FILE = APP_DIR / "youtube_token.json"
-YT_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+WORK_DIR = APP_DIR / "media"
+WORK_DIR.mkdir(parents=True, exist_ok=True)
+
+YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+
+TRIAL_STRATEGY_MAP = {
+    "Auto-Share to Followers": "SS_PERFORMANCE",
+    "Manual Approval Only": "MANUAL",
+}
+REVERSE_TRIAL_STRATEGY_MAP = {v: k for k, v in TRIAL_STRATEGY_MAP.items()}
+
+INTERVAL_MAP = {
+    "Every 5 minutes": 5,
+    "Every 15 minutes": 15,
+    "Every 30 minutes": 30,
+    "Every 60 minutes": 60,
+    "Every 2 hours": 120,
+    "Every 6 hours": 360,
+}
 
 
 def get_bundled_binary(base_name: str) -> str:
     exe_name = f"{base_name}.exe" if sys.platform == "win32" else base_name
-    candidates = []
-    if getattr(sys, "_MEIPASS", None):
-        candidates.append(Path(sys._MEIPASS) / exe_name)
-    candidates.append(Path(__file__).resolve().parent / exe_name)
-    for c in candidates:
-        if c.exists():
-            return str(c)
-    if base_name == "ffmpeg" and imageio_ffmpeg is not None:
-        try:
-            return imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception:
-            pass
-    found = shutil.which(exe_name) or shutil.which(base_name)
-    return found or exe_name
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidate = Path(sys._MEIPASS) / exe_name
+        if candidate.exists():
+            return str(candidate)
+    local_candidate = Path(__file__).resolve().parent / exe_name
+    if local_candidate.exists():
+        return str(local_candidate)
+    return exe_name
 
 
-class QuietHandler(SimpleHTTPRequestHandler):
+class QuietHTTPHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, directory=None, **kwargs):
+        super().__init__(*args, directory=str(WORK_DIR), **kwargs)
+
     def log_message(self, format, *args):
         pass
 
 
-class CloudflareTunnel:
-    def __init__(self, directory: Path, log_fn):
-        self.directory = directory
-        self.log = log_fn
-        self.httpd = None
-        self.server_thread = None
-        self.proc = None
-        self.public_url = None
-
-    def start(self) -> str:
-        handler = partial(QuietHandler, directory=str(self.directory))
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        port = self.httpd.server_address[1]
-        self.server_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
-        self.server_thread.start()
-
-        cf_bin = get_bundled_binary("cloudflared")
-        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        self.proc = subprocess.Popen(
-            [cf_bin, "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            creationflags=creationflags,
-        )
-
-        deadline = time.time() + 25
-        pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
-        while time.time() < deadline:
-            if self.proc.poll() is not None:
-                break
-            line = self.proc.stdout.readline()
-            if not line:
-                time.sleep(0.2)
-                continue
-            match = pattern.search(line)
-            if match:
-                self.public_url = match.group(0)
-                return self.public_url
-
-        self.stop()
-        raise RuntimeError("Could not establish temporary Cloudflare tunnel URL within 25s.")
-
-    def stop(self):
-        if self.proc:
-            try:
-                self.proc.terminate()
-                self.proc.wait(timeout=5)
-            except Exception:
-                try:
-                    self.proc.kill()
-                except Exception:
-                    pass
-            self.proc = None
-        if self.httpd:
-            try:
-                self.httpd.shutdown()
-                self.httpd.server_close()
-            except Exception:
-                pass
-            self.httpd = None
-
-
-class RepurposerApp:
+class MusicPromoRepurposerApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Music Promo Repurposer — TikTok to Shorts & Reels")
-        self.root.geometry("680x760")
-        self.root.configure(bg="#12141a")
-
-        APP_DIR.mkdir(parents=True, exist_ok=True)
-        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        self.root.geometry("760x730")
+        self.root.minsize(700, 660)
+        self.root.configure(bg="#18181b")
 
         self.running = False
-        self.busy = False
+        self.worker_thread = None
         self.stop_event = threading.Event()
         self.tray_icon = None
 
-        self.config = self.load_config()
-        self.build_ui()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._setup_styles()
+        self._build_ui()
+        self._load_config()
+        self._setup_tray()
 
-    def load_config(self) -> dict:
-        if CONFIG_FILE.exists():
-            try:
-                return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        return {
-            "tiktok_username": "",
-            "ig_user_id": "",
-            "fb_page_id": "",
-            "meta_page_token": "",
-            "yt_client_secret": "",
-            "yt_privacy": "private",
-            "ig_graduation": "SS_PERFORMANCE",
-            "enable_yt": True,
-            "enable_ig": True,
-            "enable_fb": True,
-        }
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def save_config(self):
-        data = {
-            "tiktok_username": self.var_tiktok.get().strip().lstrip("@"),
-            "ig_user_id": self.var_ig_id.get().strip(),
-            "fb_page_id": self.var_fb_id.get().strip(),
-            "meta_page_token": self.var_meta_token.get().strip(),
-            "yt_client_secret": self.var_yt_secret.get().strip(),
-            "yt_privacy": self.var_yt_privacy.get().strip(),
-            "ig_graduation": self.var_ig_grad.get().strip(),
-            "enable_yt": self.var_en_yt.get(),
-            "enable_ig": self.var_en_ig.get(),
-            "enable_fb": self.var_en_fb.get(),
-        }
-        CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        self.config = data
-
-    def log(self, msg: str):
-        ts = time.strftime("%H:%M:%S")
-        line = f"[{ts}] {msg}\n"
-
-        def _append():
-            self.log_box.configure(state="normal")
-            self.log_box.insert(tk.END, line)
-            self.log_box.see(tk.END)
-            self.log_box.configure(state="disabled")
-
-        self.root.after(0, _append)
-
-    def build_ui(self):
-        style = ttk.Style()
+    def _setup_styles(self):
+        style = ttk.Style(self.root)
+        # Use 'clam' theme so macOS Aqua never turns buttons white on window focus
         try:
             style.theme_use("clam")
         except Exception:
             pass
 
-        bg = "#12141a"
-        card = "#1c202a"
-        fg = "#f1f5f9"
-        muted = "#94a3b8"
-        accent = "#6366f1"
+        bg_main = "#18181b"
+        bg_card = "#27272a"
+        bg_btn = "#3f3f46"
+        bg_btn_hover = "#52525b"
+        bg_accent = "#2563eb"
+        bg_accent_hover = "#1d4ed8"
+        bg_danger = "#dc2626"
+        bg_danger_hover = "#b91c1c"
+        fg_text = "#f4f4f5"
+        fg_muted = "#a1a1aa"
 
-        header = tk.Frame(self.root, bg=bg)
-        header.pack(fill="x", padx=20, pady=(16, 8))
-        tk.Label(
-            header,
-            text="Music Promo Repurposer",
-            font=("Helvetica", 18, "bold"),
-            bg=bg,
-            fg=fg,
-        ).pack(anchor="w")
-        tk.Label(
-            header,
-            text="Auto-repost new TikToks to YouTube Shorts, Instagram Trial Reels & Facebook Reels",
-            font=("Helvetica", 10),
-            bg=bg,
-            fg=muted,
-        ).pack(anchor="w")
+        style.configure("TFrame", background=bg_main)
+        style.configure("TLabel", background=bg_main, foreground=fg_text, font=("Helvetica", 11))
+        style.configure("Header.TLabel", background=bg_main, foreground="#ffffff", font=("Helvetica", 18, "bold"))
+        style.configure("SubHeader.TLabel", background=bg_main, foreground=fg_muted, font=("Helvetica", 11))
+        style.configure("Field.TLabel", background=bg_main, foreground="#e4e4e7", font=("Helvetica", 11, "bold"))
 
-        form = tk.Frame(self.root, bg=card, padx=16, pady=14)
-        form.pack(fill="x", padx=20, pady=6)
-
-        self.var_tiktok = tk.StringVar(value=self.config.get("tiktok_username", ""))
-        self.var_ig_id = tk.StringVar(value=self.config.get("ig_user_id", ""))
-        self.var_fb_id = tk.StringVar(value=self.config.get("fb_page_id", ""))
-        self.var_meta_token = tk.StringVar(value=self.config.get("meta_page_token", ""))
-        self.var_yt_secret = tk.StringVar(value=self.config.get("yt_client_secret", ""))
-        self.var_yt_privacy = tk.StringVar(value=self.config.get("yt_privacy", "private"))
-        self.var_ig_grad = tk.StringVar(value=self.config.get("ig_graduation", "SS_PERFORMANCE"))
-        self.var_en_yt = tk.BooleanVar(value=self.config.get("enable_yt", True))
-        self.var_en_ig = tk.BooleanVar(value=self.config.get("enable_ig", True))
-        self.var_en_fb = tk.BooleanVar(value=self.config.get("enable_fb", True))
-
-        fields = [
-            ("TikTok Username (without @):", self.var_tiktok, False),
-            ("Instagram Business Account ID (178414...):", self.var_ig_id, False),
-            ("Facebook Page ID:", self.var_fb_id, False),
-            ("Permanent Meta Page Token:", self.var_meta_token, True),
-        ]
-
-        for idx, (label_text, var, is_secret) in enumerate(fields):
-            tk.Label(form, text=label_text, bg=card, fg=fg, font=("Helvetica", 10, "bold")).grid(
-                row=idx * 2, column=0, columnspan=2, sticky="w", pady=(6, 2)
-            )
-            entry = tk.Entry(
-                form,
-                textvariable=var,
-                bg="#0f1117",
-                fg=fg,
-                insertbackground=fg,
-                relief="flat",
-                font=("Helvetica", 10),
-                show="*" if is_secret else "",
-            )
-            entry.grid(row=idx * 2 + 1, column=0, columnspan=2, sticky="ew", ipady=5)
-
-        # YouTube client_secret.json picker
-        tk.Label(
-            form,
-            text="YouTube Google OAuth JSON (client_secret.json):",
-            bg=card,
-            fg=fg,
-            font=("Helvetica", 10, "bold"),
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 2))
-
-        yt_entry = tk.Entry(
-            form,
-            textvariable=self.var_yt_secret,
-            bg="#0f1117",
-            fg=fg,
-            insertbackground=fg,
-            relief="flat",
-            font=("Helvetica", 10),
+        style.configure(
+            "TEntry",
+            fieldbackground=bg_card,
+            foreground=fg_text,
+            insertcolor=fg_text,
+            bordercolor="#3f3f46",
+            lightcolor="#3f3f46",
+            darkcolor="#3f3f46",
+            padding=6,
         )
-        yt_entry.grid(row=9, column=0, sticky="ew", ipady=5, padx=(0, 8))
 
-        tk.Button(
-            form,
-            text="Browse...",
-            command=self.browse_yt_secret,
-            bg="#334155",
-            fg=fg,
-            relief="flat",
-            padx=10,
-            pady=4,
-        ).grid(row=9, column=1, sticky="e")
+        style.configure(
+            "TCombobox",
+            fieldbackground=bg_card,
+            background=bg_btn,
+            foreground=fg_text,
+            arrowcolor=fg_text,
+            bordercolor="#3f3f46",
+            lightcolor="#3f3f46",
+            darkcolor="#3f3f46",
+            padding=5,
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", bg_card)],
+            selectbackground=[("readonly", bg_card)],
+            selectforeground=[("readonly", fg_text)],
+            background=[("active", bg_btn_hover)],
+        )
 
-        # Options row
-        opts = tk.Frame(form, bg=card)
-        opts.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(10, 4))
+        style.configure(
+            "TCheckbutton",
+            background=bg_main,
+            foreground=fg_text,
+            font=("Helvetica", 11, "bold"),
+        )
+        style.map(
+            "TCheckbutton",
+            background=[("active", bg_main)],
+            foreground=[("active", "#ffffff")],
+        )
 
-        tk.Checkbutton(
-            opts, text="YouTube Shorts", variable=self.var_en_yt, bg=card, fg=fg, selectcolor="#0f1117", activebackground=card, activeforeground=fg
-        ).pack(side="left", padx=(0, 12))
-        tk.Checkbutton(
-            opts, text="IG Trial Reels", variable=self.var_en_ig, bg=card, fg=fg, selectcolor="#0f1117", activebackground=card, activeforeground=fg
-        ).pack(side="left", padx=(0, 12))
-        tk.Checkbutton(
-            opts, text="Facebook Reels", variable=self.var_en_fb, bg=card, fg=fg, selectcolor="#0f1117", activebackground=card, activeforeground=fg
-        ).pack(side="left")
+        style.configure(
+            "Dark.TButton",
+            background=bg_btn,
+            foreground="#ffffff",
+            bordercolor="#52525b",
+            lightcolor=bg_btn,
+            darkcolor=bg_btn,
+            focuscolor="none",
+            font=("Helvetica", 11, "bold"),
+            padding=(12, 7),
+        )
+        style.map(
+            "Dark.TButton",
+            background=[("disabled", "#27272a"), ("pressed", "#27272a"), ("active", bg_btn_hover)],
+            foreground=[("disabled", "#71717a"), ("active", "#ffffff")],
+        )
 
-        dropdowns = tk.Frame(form, bg=card)
-        dropdowns.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(6, 2))
+        style.configure(
+            "Primary.TButton",
+            background=bg_accent,
+            foreground="#ffffff",
+            bordercolor=bg_accent,
+            lightcolor=bg_accent,
+            darkcolor=bg_accent,
+            focuscolor="none",
+            font=("Helvetica", 11, "bold"),
+            padding=(14, 7),
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("disabled", "#1e3a8a"), ("pressed", "#1e40af"), ("active", bg_accent_hover)],
+            foreground=[("disabled", "#93c5fd"), ("active", "#ffffff")],
+        )
 
-        tk.Label(dropdowns, text="YT Privacy:", bg=card, fg=muted, font=("Helvetica", 9)).pack(side="left")
-        ttk.Combobox(
-            dropdowns,
-            textvariable=self.var_yt_privacy,
+        style.configure(
+            "Danger.TButton",
+            background=bg_danger,
+            foreground="#ffffff",
+            bordercolor=bg_danger,
+            lightcolor=bg_danger,
+            darkcolor=bg_danger,
+            focuscolor="none",
+            font=("Helvetica", 11, "bold"),
+            padding=(14, 7),
+        )
+        style.map(
+            "Danger.TButton",
+            background=[("disabled", "#451a1a"), ("pressed", "#991b1b"), ("active", bg_danger_hover)],
+            foreground=[("disabled", "#71717a"), ("active", "#ffffff")],
+        )
+
+    def _build_ui(self):
+        container = ttk.Frame(self.root, padding=20)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(container, text="Music Promo Repurposer", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            container,
+            text="Auto-repost new TikToks to YouTube Shorts, Instagram Trial Reels & Facebook Reels",
+            style="SubHeader.TLabel",
+        ).pack(anchor="w", pady=(2, 14))
+
+        self.tiktok_var = tk.StringVar()
+        self.ig_id_var = tk.StringVar()
+        self.fb_id_var = tk.StringVar()
+        self.meta_token_var = tk.StringVar()
+        self.yt_secret_var = tk.StringVar()
+
+        self._add_labeled_entry(container, "TikTok Username (without @):", self.tiktok_var)
+        self._add_labeled_entry(container, "Instagram Business Account ID (178414...):", self.ig_id_var)
+        self._add_labeled_entry(container, "Facebook Page ID:", self.fb_id_var)
+        self._add_labeled_entry(container, "Permanent Meta Page Token:", self.meta_token_var, show="*")
+
+        # YouTube JSON picker row
+        ttk.Label(container, text="YouTube Google OAuth JSON (client_secret.json):", style="Field.TLabel").pack(
+            anchor="w", pady=(6, 2)
+        )
+        yt_row = ttk.Frame(container)
+        yt_row.pack(fill=tk.X, pady=(0, 8))
+        yt_entry = ttk.Entry(yt_row, textvariable=self.yt_secret_var)
+        yt_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        ttk.Button(yt_row, text="Browse...", style="Dark.TButton", command=self._browse_yt_secret).pack(side=tk.RIGHT)
+
+        # Platform toggles
+        toggles_row = ttk.Frame(container)
+        toggles_row.pack(fill=tk.X, pady=(6, 8))
+        self.enable_yt = tk.BooleanVar(value=True)
+        self.enable_ig = tk.BooleanVar(value=True)
+        self.enable_fb = tk.BooleanVar(value=True)
+
+        ttk.Checkbutton(toggles_row, text="YouTube Shorts", variable=self.enable_yt).pack(side=tk.LEFT, padx=(0, 18))
+        ttk.Checkbutton(toggles_row, text="IG Trial Reels", variable=self.enable_ig).pack(side=tk.LEFT, padx=(0, 18))
+        ttk.Checkbutton(toggles_row, text="Facebook Reels", variable=self.enable_fb).pack(side=tk.LEFT)
+
+        # Settings row: YT Privacy | IG Trial Mode | Check Interval
+        settings_row = ttk.Frame(container)
+        settings_row.pack(fill=tk.X, pady=(4, 14))
+
+        ttk.Label(settings_row, text="YT Privacy:", style="Field.TLabel").pack(side=tk.LEFT, padx=(0, 6))
+        self.yt_privacy_var = tk.StringVar(value="private")
+        yt_cb = ttk.Combobox(
+            settings_row,
+            textvariable=self.yt_privacy_var,
             values=["private", "unlisted", "public"],
-            width=10,
             state="readonly",
-        ).pack(side="left", padx=(4, 16))
+            width=9,
+        )
+        yt_cb.pack(side=tk.LEFT, padx=(0, 14))
 
-        tk.Label(dropdowns, text="IG Trial Strategy:", bg=card, fg=muted, font=("Helvetica", 9)).pack(side="left")
-        ttk.Combobox(
-            dropdowns,
-            textvariable=self.var_ig_grad,
-            values=["SS_PERFORMANCE", "MANUAL"],
+        ttk.Label(settings_row, text="IG Trial Mode:", style="Field.TLabel").pack(side=tk.LEFT, padx=(0, 6))
+        self.ig_strategy_var = tk.StringVar(value="Auto-Share to Followers")
+        ig_cb = ttk.Combobox(
+            settings_row,
+            textvariable=self.ig_strategy_var,
+            values=list(TRIAL_STRATEGY_MAP.keys()),
+            state="readonly",
+            width=21,
+        )
+        ig_cb.pack(side=tk.LEFT, padx=(0, 14))
+
+        ttk.Label(settings_row, text="Check Interval:", style="Field.TLabel").pack(side=tk.LEFT, padx=(0, 6))
+        self.interval_var = tk.StringVar(value="Every 15 minutes")
+        int_cb = ttk.Combobox(
+            settings_row,
+            textvariable=self.interval_var,
+            values=list(INTERVAL_MAP.keys()),
+            state="readonly",
             width=16,
-            state="readonly",
-        ).pack(side="left", padx=(4, 0))
-
-        form.columnconfigure(0, weight=1)
+        )
+        int_cb.pack(side=tk.LEFT)
 
         # Action Buttons
-        btns = tk.Frame(self.root, bg=bg)
-        btns.pack(fill="x", padx=20, pady=10)
+        btn_row = ttk.Frame(container)
+        btn_row.pack(fill=tk.X, pady=(2, 12))
 
-        self.btn_start = tk.Button(
-            btns,
-            text="Start Auto-Sync (15m)",
-            command=self.start_loop,
-            bg=accent,
-            fg="#ffffff",
-            font=("Helvetica", 10, "bold"),
-            relief="flat",
-            padx=14,
-            pady=8,
+        self.start_btn = ttk.Button(
+            btn_row, text="Start Auto-Sync", style="Primary.TButton", command=self.start_loop
         )
-        self.btn_start.pack(side="left", padx=(0, 8))
+        self.start_btn.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_stop = tk.Button(
-            btns,
-            text="Stop",
-            command=self.stop_loop,
-            bg="#334155",
-            fg="#ffffff",
-            font=("Helvetica", 10),
-            relief="flat",
-            padx=12,
-            pady=8,
-            state="disabled",
+        self.stop_btn = ttk.Button(
+            btn_row, text="Stop", style="Danger.TButton", command=self.stop_loop, state=tk.DISABLED
         )
-        self.btn_stop.pack(side="left", padx=(0, 8))
+        self.stop_btn.pack(side=tk.LEFT, padx=(0, 8))
 
-        tk.Button(
-            btns,
-            text="Run Now (Test)",
-            command=self.run_once_async,
-            bg="#0ea5e9",
-            fg="#ffffff",
-            font=("Helvetica", 10, "bold"),
-            relief="flat",
-            padx=12,
-            pady=8,
-        ).pack(side="left", padx=(0, 8))
-
-        tk.Button(
-            btns,
-            text="Connect YouTube",
-            command=self.connect_youtube_async,
-            bg="#1e293b",
-            fg="#f1f5f9",
-            font=("Helvetica", 10),
-            relief="flat",
-            padx=12,
-            pady=8,
-        ).pack(side="right")
-
-        # Log area
-        tk.Label(self.root, text="Activity Log", bg=bg, fg=muted, font=("Helvetica", 9, "bold")).pack(
-            anchor="w", padx=20
+        self.test_btn = ttk.Button(
+            btn_row, text="Run Now (Test)", style="Dark.TButton", command=self.run_once_manual
         )
+        self.test_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.yt_auth_btn = ttk.Button(
+            btn_row, text="Connect YouTube", style="Dark.TButton", command=self.connect_youtube
+        )
+        self.yt_auth_btn.pack(side=tk.RIGHT)
+
+        # Activity Log
+        ttk.Label(container, text="Activity Log", style="Field.TLabel").pack(anchor="w", pady=(4, 4))
         self.log_box = scrolledtext.ScrolledText(
-            self.root,
+            container,
             height=13,
-            bg="#0f1117",
-            fg="#cbd5e1",
-            font=("Courier", 9),
-            relief="flat",
-            state="disabled",
+            bg="#09090b",
+            fg="#e4e4e7",
+            insertbackground="#ffffff",
+            font=("Courier", 10),
+            relief=tk.FLAT,
+            padx=10,
+            pady=10,
         )
-        self.log_box.pack(fill="both", expand=True, padx=20, pady=(4, 16))
+        self.log_box.pack(fill=tk.BOTH, expand=True)
         self.log("Ready. Enter your details above and click 'Run Now (Test)' or 'Start Auto-Sync'.")
 
-    def browse_yt_secret(self):
+    def _add_labeled_entry(self, parent, label_text: str, variable: tk.StringVar, show: str = None):
+        ttk.Label(parent, text=label_text, style="Field.TLabel").pack(anchor="w", pady=(6, 2))
+        entry = ttk.Entry(parent, textvariable=variable, show=show if show else "")
+        entry.pack(fill=tk.X, pady=(0, 4))
+
+    def log(self, message: str):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        line = f"[{timestamp}] {message}\n"
+
+        def _append():
+            self.log_box.insert(tk.END, line)
+            self.log_box.see(tk.END)
+
+        self.root.after(0, _append)
+
+    def _browse_yt_secret(self):
         path = filedialog.askopenfilename(
-            title="Select Google OAuth client_secret.json",
+            title="Select Google client_secret.json",
             filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
         )
         if path:
-            self.var_yt_secret.set(path)
-            self.save_config()
+            self.yt_secret_var.set(path)
+            self._save_config()
 
-    def get_youtube_service(self):
-        if not HAS_GOOGLE:
-            raise RuntimeError("Google API libraries missing in build.")
-        secret_path = self.config.get("yt_client_secret", "")
-        if not secret_path or not Path(secret_path).exists():
-            raise RuntimeError("Please select your Google client_secret.json file first.")
+    def _save_config(self):
+        data = {
+            "tiktok_username": self.tiktok_var.get().strip().lstrip("@"),
+            "ig_business_id": self.ig_id_var.get().strip(),
+            "fb_page_id": self.fb_id_var.get().strip(),
+            "meta_page_token": self.meta_token_var.get().strip(),
+            "yt_client_secret": self.yt_secret_var.get().strip(),
+            "enable_yt": self.enable_yt.get(),
+            "enable_ig": self.enable_ig.get(),
+            "enable_fb": self.enable_fb.get(),
+            "yt_privacy": self.yt_privacy_var.get(),
+            "ig_trial_label": self.ig_strategy_var.get(),
+            "check_interval_label": self.interval_var.get(),
+        }
+        CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-        creds = None
-        if YT_TOKEN_FILE.exists():
-            creds = Credentials.from_authorized_user_file(str(YT_TOKEN_FILE), YT_SCOPES)
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(secret_path, YT_SCOPES)
-                creds = flow.run_local_server(port=0)
-            YT_TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
-        return build("youtube", "v3", credentials=creds)
-
-    def connect_youtube_async(self):
-        self.save_config()
-
-        def _work():
-            try:
-                self.log("Opening browser for Google / YouTube login...")
-                self.get_youtube_service()
-                self.log("YouTube connected successfully!")
-            except Exception as exc:
-                self.log(f"YouTube login error: {exc}")
-
-        threading.Thread(target=_work, daemon=True).start()
-
-    def start_loop(self):
-        self.save_config()
-        if not self.config.get("tiktok_username"):
-            messagebox.showwarning("Missing Username", "Please enter your TikTok username.")
+    def _load_config(self):
+        if not CONFIG_FILE.exists():
             return
-        if self.running:
-            return
-        self.running = True
-        self.stop_event.clear()
-        self.btn_start.configure(state="disabled")
-        self.btn_stop.configure(state="normal")
-        self.log("Auto-Sync started (checking every 15 minutes).")
-        threading.Thread(target=self._poll_worker, daemon=True).start()
-
-    def stop_loop(self):
-        self.running = False
-        self.stop_event.set()
-        self.btn_start.configure(state="normal")
-        self.btn_stop.configure(state="disabled")
-        self.log("Auto-Sync stopped.")
-
-    def _poll_worker(self):
-        while self.running and not self.stop_event.is_set():
-            self.execute_pipeline()
-            self.stop_event.wait(15 * 60)
-
-    def run_once_async(self):
-        self.save_config()
-        if not self.config.get("tiktok_username"):
-            messagebox.showwarning("Missing Username", "Please enter your TikTok username.")
-            return
-        if self.busy:
-            self.log("A sync run is already in progress...")
-            return
-        threading.Thread(target=self.execute_pipeline, daemon=True).start()
-
-    def execute_pipeline(self):
-        if self.busy:
-            return
-        self.busy = True
         try:
-            user = self.config["tiktok_username"]
-            self.log(f"Checking @{user} on TikTok for new videos (last 24h)...")
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            self.tiktok_var.set(data.get("tiktok_username", ""))
+            self.ig_id_var.set(data.get("ig_business_id", ""))
+            self.fb_id_var.set(data.get("fb_page_id", ""))
+            self.meta_token_var.set(data.get("meta_page_token", ""))
+            self.yt_secret_var.set(data.get("yt_client_secret", ""))
+            self.enable_yt.set(data.get("enable_yt", True))
+            self.enable_ig.set(data.get("enable_ig", True))
+            self.enable_fb.set(data.get("enable_fb", True))
+            self.yt_privacy_var.set(data.get("yt_privacy", "private"))
 
-            for old in TEMP_DIR.glob("latest_tiktok.*"):
-                try:
-                    old.unlink()
-                except Exception:
-                    pass
+            saved_label = data.get("ig_trial_label")
+            if saved_label in TRIAL_STRATEGY_MAP:
+                self.ig_strategy_var.set(saved_label)
+            elif data.get("ig_strategy") in REVERSE_TRIAL_STRATEGY_MAP:
+                self.ig_strategy_var.set(REVERSE_TRIAL_STRATEGY_MAP[data["ig_strategy"]])
 
-            ffmpeg_loc = get_bundled_binary("ffmpeg")
-            ydl_opts = {
-                "playlistend": 8,
-                "max_downloads": 1,
-                "download_archive": str(ARCHIVE_FILE),
-                "writeinfojson": True,
-                "format": "bv*[vcodec^=avc1]+ba[ext=m4a]/b[vcodec^=avc1]/b[ext=mp4]",
-                "merge_output_format": "mp4",
-                "outtmpl": str(TEMP_DIR / "latest_tiktok.%(ext)s"),
-                "ffmpeg_location": ffmpeg_loc,
-                "quiet": True,
-                "no_warnings": True,
-                "ignoreerrors": True,
-            }
+            saved_interval = data.get("check_interval_label")
+            if saved_interval in INTERVAL_MAP:
+                self.interval_var.set(saved_interval)
+        except Exception as e:
+            self.log(f"Warning: Could not load saved config: {e}")
 
-            try:
-                from yt_dlp.utils import DateRange
-                ydl_opts["dateafter"] = DateRange("now-1day")
-            except Exception:
-                pass
+    def _setup_tray(self):
+        if not HAS_TRAY or sys.platform == "darwin":
+            return
+        try:
+            img = Image.new("RGB", (64, 64), color=(37, 99, 235))
+            draw = ImageDraw.Draw(img)
+            draw.polygon([(22, 16), (22, 48), (48, 32)], fill=(255, 255, 255))
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([f"https://www.tiktok.com/@{user}"])
-            except Exception:
-                pass
+            menu = pystray.Menu(
+                pystray.MenuItem("Open Window", self._show_window, default=True),
+                pystray.MenuItem("Quit", self._quit_app),
+            )
+            self.tray_icon = pystray.Icon("MusicPromoRepurposer", img, "Music Promo Repurposer", menu)
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        except Exception:
+            self.tray_icon = None
 
-            mp4_file = TEMP_DIR / "latest_tiktok.mp4"
-            info_file = TEMP_DIR / "latest_tiktok.info.json"
-
-            if not mp4_file.exists():
-                self.log("No new unposted TikTok found in the last 24 hours.")
-                return
-
-            title = "New Music Short"
-            desc = "New Music!"
-            if info_file.exists():
-                try:
-                    meta = json.loads(info_file.read_text(encoding="utf-8"))
-                    title = (meta.get("title") or "New Music Short")[:95]
-                    desc = meta.get("description") or title
-                except Exception:
-                    pass
-
-            self.log(f"Downloaded new TikTok: '{title}'")
-
-            # 1. YouTube Shorts
-            if self.config.get("enable_yt"):
-                try:
-                    self.log("Uploading to YouTube Shorts...")
-                    yt = self.get_youtube_service()
-                    body = {
-                        "snippet": {
-                            "title": title,
-                            "description": desc,
-                            "categoryId": "10",
-                        },
-                        "status": {
-                            "privacyStatus": self.config.get("yt_privacy", "private"),
-                            "selfDeclaredMadeForKids": False,
-                        },
-                    }
-                    media = MediaFileUpload(str(mp4_file), mimetype="video/mp4", resumable=True)
-                    req = yt.videos().insert(part="snippet,status", body=body, media_body=media)
-                    resp = None
-                    while resp is None:
-                        _, resp = req.next_chunk()
-                    self.log(f"YouTube Short uploaded! Video ID: {resp.get('id')}")
-                except Exception as exc:
-                    self.log(f"YouTube upload failed: {exc}")
-
-            # 2. Instagram Trial Reels & Facebook Page Reels via temporary Cloudflare Tunnel
-            need_meta = (self.config.get("enable_ig") or self.config.get("enable_fb")) and self.config.get("meta_page_token")
-            if need_meta:
-                tunnel = CloudflareTunnel(TEMP_DIR, self.log)
-                try:
-                    self.log("Opening temporary HTTPS tunnel for Instagram / Facebook...")
-                    base_url = tunnel.start()
-                    video_url = f"{base_url}/latest_tiktok.mp4"
-                    token = self.config["meta_page_token"]
-
-                    # Instagram Trial Reel
-                    if self.config.get("enable_ig") and self.config.get("ig_user_id"):
-                        try:
-                            ig_id = self.config["ig_user_id"]
-                            self.log("Creating Instagram Trial Reel container...")
-                            r1 = requests.post(
-                                f"https://graph.facebook.com/v21.0/{ig_id}/media",
-                                json={
-                                    "media_type": "REELS",
-                                    "video_url": video_url,
-                                    "caption": desc,
-                                    "trial_params": {
-                                        "graduation_strategy": self.config.get("ig_graduation", "SS_PERFORMANCE")
-                                    },
-                                    "access_token": token,
-                                },
-                                timeout=60,
-                            )
-                            r1.raise_for_status()
-                            creation_id = r1.json()["id"]
-                            self.log("Waiting 45s for Instagram to process video...")
-                            time.sleep(45)
-
-                            r2 = requests.post(
-                                f"https://graph.facebook.com/v21.0/{ig_id}/media_publish",
-                                params={"creation_id": creation_id, "access_token": token},
-                                timeout=60,
-                            )
-                            r2.raise_for_status()
-                            self.log(f"Instagram Trial Reel published! Media ID: {r2.json().get('id')}")
-                        except Exception as exc:
-                            detail = getattr(getattr(exc, "response", None), "text", str(exc))
-                            self.log(f"Instagram Trial Reel failed: {detail}")
-
-                    # Facebook Page Reel
-                    if self.config.get("enable_fb") and self.config.get("fb_page_id"):
-                        try:
-                            fb_id = self.config["fb_page_id"]
-                            self.log("Publishing Reel to Facebook Page...")
-                            rf = requests.post(
-                                f"https://graph-video.facebook.com/v21.0/{fb_id}/videos",
-                                params={
-                                    "file_url": video_url,
-                                    "description": desc,
-                                    "access_token": token,
-                                },
-                                timeout=120,
-                            )
-                            rf.raise_for_status()
-                            self.log(f"Facebook Page Reel uploaded! Video ID: {rf.json().get('id')}")
-                            time.sleep(15)
-                        except Exception as exc:
-                            detail = getattr(getattr(exc, "response", None), "text", str(exc))
-                            self.log(f"Facebook Page upload failed: {detail}")
-                finally:
-                    tunnel.stop()
-                    self.log("Closed temporary tunnel.")
-
-            self.log("Sync cycle complete!")
-        finally:
-            self.busy = False
-
-    def create_tray_image(self):
-        img = Image.new("RGB", (64, 64), color=(99, 102, 241))
-        draw = ImageDraw.Draw(img)
-        draw.polygon([(22, 16), (22, 48), (48, 32)], fill=(255, 255, 255))
-        return img
-
-    def on_close(self):
-        self.save_config()
-        if HAS_TRAY and self.running:
-            self.root.withdraw()
-            if self.tray_icon is None:
-                menu = pystray.Menu(
-                    pystray.MenuItem("Open Window", self.restore_window, default=True),
-                    pystray.MenuItem("Quit", self.quit_app),
-                )
-                self.tray_icon = pystray.Icon("MusicPromoRepurposer", self.create_tray_image(), "Music Promo Repurposer", menu)
-                threading.Thread(target=self.tray_icon.run, daemon=True).start()
-        else:
-            self.quit_app()
-
-    def restore_window(self, icon=None, item=None):
+    def _show_window(self, icon=None, item=None):
         self.root.after(0, self.root.deiconify)
 
-    def quit_app(self, icon=None, item=None):
-        self.running = False
+    def _on_close(self):
+        self._save_config()
+        if self.tray_icon and self.running:
+            self.root.withdraw()
+        else:
+            self._quit_app()
+
+    def _quit_app(self, icon=None, item=None):
         self.stop_event.set()
         if self.tray_icon:
             try:
@@ -671,8 +441,311 @@ class RepurposerApp:
                 pass
         self.root.after(0, self.root.destroy)
 
+    def connect_youtube(self):
+        if not HAS_GOOGLE:
+            messagebox.showerror("Missing Libraries", "Google API libraries were not bundled in this build.")
+            return
+        secret_path = self.yt_secret_var.get().strip()
+        if not secret_path or not os.path.exists(secret_path):
+            messagebox.showwarning("Missing File", "Please select your Google client_secret.json file first.")
+            return
+        self._save_config()
+
+        def _auth():
+            try:
+                self.log("Opening browser for YouTube Google OAuth login...")
+                flow = InstalledAppFlow.from_client_secrets_file(secret_path, YOUTUBE_SCOPES)
+                creds = flow.run_local_server(port=0)
+                YT_TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+                self.log("YouTube connected successfully! Token saved.")
+            except Exception as e:
+                self.log(f"YouTube login error: {e}")
+
+        threading.Thread(target=_auth, daemon=True).start()
+
+    def _get_youtube_service(self):
+        if not HAS_GOOGLE or not YT_TOKEN_FILE.exists():
+            return None
+        creds = Credentials.from_authorized_user_file(str(YT_TOKEN_FILE), YOUTUBE_SCOPES)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            YT_TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+        return build("youtube", "v3", credentials=creds)
+
+    def start_loop(self):
+        self._save_config()
+        if not self.tiktok_var.get().strip():
+            messagebox.showwarning("Missing Username", "Please enter your TikTok username.")
+            return
+        if self.running:
+            return
+
+        self.running = True
+        self.stop_event.clear()
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
+
+        interval_label = self.interval_var.get()
+        interval_mins = INTERVAL_MAP.get(interval_label, 15)
+        self.log(f"Auto-Sync started (checking TikTok {interval_label.lower()}).")
+
+        def _loop():
+            while not self.stop_event.is_set():
+                self._run_pipeline()
+                if self.stop_event.wait(timeout=interval_mins * 60):
+                    break
+
+        self.worker_thread = threading.Thread(target=_loop, daemon=True)
+        self.worker_thread.start()
+
+    def stop_loop(self):
+        self.running = False
+        self.stop_event.set()
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.log("Auto-Sync stopped.")
+
+    def run_once_manual(self):
+        self._save_config()
+        if not self.tiktok_var.get().strip():
+            messagebox.showwarning("Missing Username", "Please enter your TikTok username.")
+            return
+        threading.Thread(target=self._run_pipeline, daemon=True).start()
+
+    def _run_pipeline(self):
+        username = self.tiktok_var.get().strip().lstrip("@")
+        self.log(f"Checking @{username} on TikTok for new posts (last 24h)...")
+
+        for old_file in WORK_DIR.glob("latest_tiktok.*"):
+            try:
+                old_file.unlink()
+            except Exception:
+                pass
+
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+
+        ydl_opts = {
+            "playlistend": 8,
+            "max_downloads": 1,
+            "download_archive": str(HISTORY_FILE),
+            "daterange": yt_dlp.utils.DateRange(start=yesterday),
+            "format": "bv*[vcodec^=avc1]+ba[ext=m4a]/b[vcodec^=avc1]/b[ext=mp4]",
+            "merge_output_format": "mp4",
+            "ffmpeg_location": ffmpeg_path,
+            "outtmpl": str(WORK_DIR / "latest_tiktok.%(ext)s"),
+            "writeinfojson": True,
+            "quiet": True,
+            "no_warnings": True,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"https://www.tiktok.com/@{username}"])
+        except yt_dlp.utils.MaxDownloadsReached:
+            pass
+        except Exception as e:
+            self.log(f"TikTok check notice: {e}")
+
+        video_file = WORK_DIR / "latest_tiktok.mp4"
+        info_file = WORK_DIR / "latest_tiktok.info.json"
+
+        if not video_file.exists():
+            self.log("No new unposted TikToks found in the last 24 hours.")
+            return
+
+        title = "New Music Short"
+        description = "New Music!"
+        if info_file.exists():
+            try:
+                info = json.loads(info_file.read_text(encoding="utf-8"))
+                raw_title = (info.get("title") or info.get("description") or "New Music Short").strip()
+                title = raw_title[:95] if raw_title else "New Music Short"
+                description = (info.get("description") or raw_title or "New Music!").strip()
+            except Exception:
+                pass
+
+        self.log(f"Downloaded new TikTok: '{title}'")
+
+        # 1. YouTube Shorts
+        if self.enable_yt.get():
+            self._upload_youtube(video_file, title, description)
+
+        # 2. Instagram Trial Reels & Facebook Page Reels (via temporary Cloudflare Quick Tunnel)
+        if self.enable_ig.get() or self.enable_fb.get():
+            self._publish_meta_platforms(video_file, description)
+
+        self.log("Cycle complete!")
+
+    def _upload_youtube(self, video_file: Path, title: str, description: str):
+        try:
+            yt = self._get_youtube_service()
+            if not yt:
+                self.log("YouTube skipped: Click 'Connect YouTube' first.")
+                return
+            self.log("Uploading YouTube Short...")
+            body = {
+                "snippet": {
+                    "title": title,
+                    "description": description,
+                    "categoryId": "10",
+                },
+                "status": {
+                    "privacyStatus": self.yt_privacy_var.get(),
+                    "selfDeclaredMadeForKids": False,
+                },
+            }
+            media = MediaFileUpload(str(video_file), mimetype="video/mp4", resumable=True)
+            req = yt.videos().insert(part="snippet,status", body=body, media_body=media)
+            resp = req.execute()
+            self.log(f"YouTube Short uploaded! Video ID: {resp.get('id')}")
+        except Exception as e:
+            self.log(f"YouTube upload failed: {e}")
+
+    def _publish_meta_platforms(self, video_file: Path, caption: str):
+        token = self.meta_token_var.get().strip()
+        if not token:
+            self.log("Meta upload skipped: Permanent Meta Page Token is missing.")
+            return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHTTPHandler)
+        port = server.server_address[1]
+        srv_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        srv_thread.start()
+
+        cloudflared_bin = get_bundled_binary("cloudflared")
+        cf_proc = None
+        tunnel_url = None
+
+        try:
+            self.log("Opening temporary secure tunnel for Instagram & Facebook...")
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            cf_proc = subprocess.Popen(
+                [cloudflared_bin, "tunnel", "--url", f"http://127.0.0.1:{port}"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                creationflags=creation_flags,
+            )
+
+            deadline = time.time() + 25
+            while time.time() < deadline:
+                line = cf_proc.stdout.readline()
+                if not line:
+                    break
+                match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                if match:
+                    tunnel_url = match.group(0)
+                    break
+
+            if not tunnel_url:
+                self.log("Could not establish Cloudflare tunnel URL. Skipping Meta uploads.")
+                return
+
+            public_video_url = f"{tunnel_url}/latest_tiktok.mp4"
+            time.sleep(3)
+
+            if self.enable_ig.get():
+                self._upload_instagram_trial_reel(public_video_url, caption, token)
+
+            if self.enable_fb.get():
+                self._upload_facebook_reel(public_video_url, caption, token)
+
+        except Exception as e:
+            self.log(f"Meta tunnel/upload error: {e}")
+        finally:
+            if cf_proc:
+                try:
+                    cf_proc.terminate()
+                except Exception:
+                    pass
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+
+    def _upload_instagram_trial_reel(self, video_url: str, caption: str, token: str):
+        ig_id = self.ig_id_var.get().strip()
+        if not ig_id:
+            self.log("Instagram skipped: Instagram Business Account ID is missing.")
+            return
+
+        strategy_code = TRIAL_STRATEGY_MAP.get(self.ig_strategy_var.get(), "SS_PERFORMANCE")
+
+        try:
+            self.log(f"Creating Instagram Trial Reel ({self.ig_strategy_var.get()})...")
+            create_resp = requests.post(
+                f"https://graph.facebook.com/v21.0/{ig_id}/media",
+                json={
+                    "media_type": "REELS",
+                    "video_url": video_url,
+                    "caption": caption,
+                    "trial_params": {"graduation_strategy": strategy_code},
+                    "access_token": token,
+                },
+                timeout=30,
+            ).json()
+
+            creation_id = create_resp.get("id")
+            if not creation_id:
+                self.log(f"Instagram container error: {create_resp}")
+                return
+
+            self.log("Waiting for Instagram to process video...")
+            for _ in range(18):
+                time.sleep(5)
+                status_resp = requests.get(
+                    f"https://graph.facebook.com/v21.0/{creation_id}",
+                    params={"fields": "status_code", "access_token": token},
+                    timeout=15,
+                ).json()
+                status_code = status_resp.get("status_code")
+                if status_code == "FINISHED":
+                    break
+                if status_code == "ERROR":
+                    self.log(f"Instagram processing failed: {status_resp}")
+                    return
+
+            pub_params = urllib.parse.urlencode({"creation_id": creation_id, "access_token": token})
+            pub_resp = requests.post(
+                f"https://graph.facebook.com/v21.0/{ig_id}/media_publish?{pub_params}",
+                timeout=30,
+            ).json()
+
+            if pub_resp.get("id"):
+                self.log(f"Instagram Trial Reel published! Post ID: {pub_resp['id']}")
+            else:
+                self.log(f"Instagram publish error: {pub_resp}")
+        except Exception as e:
+            self.log(f"Instagram upload failed: {e}")
+
+    def _upload_facebook_reel(self, video_url: str, description: str, token: str):
+        fb_id = self.fb_id_var.get().strip()
+        if not fb_id:
+            self.log("Facebook skipped: Facebook Page ID is missing.")
+            return
+
+        try:
+            self.log("Uploading Facebook Page Reel...")
+            resp = requests.post(
+                f"https://graph-video.facebook.com/v21.0/{fb_id}/videos",
+                params={
+                    "file_url": video_url,
+                    "description": description,
+                    "access_token": token,
+                },
+                timeout=60,
+            ).json()
+
+            if resp.get("id"):
+                self.log(f"Facebook Reel published! Video ID: {resp['id']}")
+            else:
+                self.log(f"Facebook upload error: {resp}")
+        except Exception as e:
+            self.log(f"Facebook upload failed: {e}")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = RepurposerApp(root)
+    app = MusicPromoRepurposerApp(root)
     root.mainloop()
