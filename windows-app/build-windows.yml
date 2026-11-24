@@ -2,7 +2,10 @@ name: Build Windows Executable
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
+    paths:
+      - 'windows-app/**'
+      - '.github/workflows/build-windows.yml'
   workflow_dispatch:
 
 permissions:
@@ -24,7 +27,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r windows-app/requirements.txt pyinstaller
 
       - name: Download FFmpeg & Cloudflared binaries
         shell: pwsh
@@ -32,17 +35,13 @@ jobs:
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
           Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_extracted"
           $ffmpegExe = Get-ChildItem -Path "ffmpeg_extracted" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-          Copy-Item $ffmpegExe.FullName -Destination "ffmpeg.exe"
+          Copy-Item $ffmpegExe.FullName -Destination "windows-app/ffmpeg.exe"
 
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "windows-app/cloudflared.exe"
 
       - name: Build single-file Windows EXE
         run: |
-          pyinstaller --noconfirm --onefile --windowed `
-            --name "MusicPromoRepurposer-Windows" `
-            --add-binary "ffmpeg.exe;." `
-            --add-binary "cloudflared.exe;." `
-            app.py
+          pyinstaller --noconsole --onefile --name "MusicPromoRepurposer-Windows" --add-binary "windows-app/ffmpeg.exe;." --add-binary "windows-app/cloudflared.exe;." windows-app/app.py
 
       - name: Publish Release with EXE
         uses: softprops/action-gh-release@v2
@@ -50,3 +49,5 @@ jobs:
           tag_name: v1.0.${{ github.run_number }}
           name: Music Promo Repurposer v1.0.${{ github.run_number }}
           files: dist/MusicPromoRepurposer-Windows.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
