@@ -20,10 +20,11 @@ You only need to do this once. No business verification or company registration 
    * Switch your Instagram profile to a **Creator** or **Business** account (set to **Public**).
    * Connect it to a **Facebook Page** (Instagram App → *Edit Profile → Page → Connect or Create*).
 2. **Create a Meta App:**
-   * Go to [Meta for Developers](https://facebook.com) → **My Apps → Create App** → choose **Other → Business** (leave the app in *Development Mode*).
+   * Go to [Meta for Developers](https://developers.facebook.com/apps
+) → **My Apps → Create App** → choose **Other → Business** (leave the app in *Development Mode*).
    * Copy your **App ID** and **App Secret** from *App Settings → Basic*.
 3. **Generate a 60-Day User Token:**
-   * Open the [Meta Graph API Explorer](https://facebook.comtools/explorer/), select your app on the right, and add these 5 permissions:
+   * Open the [Meta Graph API Explorer](https://developers.facebook.com/tools/explorer/), select your app on the right, and add these 5 permissions:
      * `instagram_basic`
      * `instagram_content_publish`
      * `pages_show_list`
@@ -39,7 +40,7 @@ You only need to do this once. No business verification or company registration 
      * **`id`** at the bottom of your Page block (your **Facebook Page ID**)
 
 ### B. YouTube Shorts Credentials (Google Cloud)
-1. Go to [Google Cloud Console](https://google.com), create a new project, and enable the **YouTube Data API v3**.
+1. Go to [Google Cloud Console](https://console.cloud.google.com/), create a new project, and enable the **YouTube Data API v3**.
 2. Go to **APIs & Services → OAuth consent screen**, choose **External**, add your Gmail address under **Test users**, and save.
 3. Go to **Credentials → Create Credentials → OAuth client ID**:
    * **For the Desktop App:** Choose **Desktop app** and download the JSON file (`client_secret_...json`).
