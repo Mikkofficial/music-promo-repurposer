@@ -93,9 +93,9 @@ Automatically cross-post your TikTok videos (without watermarks, in high-fidelit
    ```bash
    ssh root@YOUR_SERVER_IP
    ```
-2. Run the automated installer (replace `YOUR_GITHUB_USERNAME` with the owner of this repository):
+2. Run the automated installer:
    ```bash
-   curl -sSL https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/music-promo-repurposer/main/install.sh | bash
+   curl -sSL https://raw.githubusercontent.com/Mikkofficial/music-promo-repurposer/main/install.sh | bash
    ```
 3. Follow the on-screen prompts and paste in:
    * Your subdomain (`promo.yourdomain.com`)
