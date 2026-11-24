@@ -23,16 +23,16 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r windows-app/requirements.txt pyinstaller
+          pip install -r Desktop-app/requirements.txt pyinstaller
 
       - name: Download Cloudflared binary
         shell: pwsh
         run: |
-          curl.exe -sSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -o "windows-app/cloudflared.exe"
+          curl.exe -sSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -o "Desktop-app/cloudflared.exe"
 
       - name: Build Windows EXE
         run: |
-          pyinstaller --noconsole --onefile --name "MusicPromoRepurposer-Windows" --collect-all imageio_ffmpeg --add-binary "windows-app/cloudflared.exe;." windows-app/app.py
+          pyinstaller --noconsole --onefile --name "MusicPromoRepurposer-Windows" --collect-all imageio_ffmpeg --add-binary "Desktop-app/cloudflared.exe;." Desktop-app/app.py
 
       - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
@@ -54,17 +54,17 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip3 install -r windows-app/requirements.txt pyinstaller
+          pip3 install -r Desktop-app/requirements.txt pyinstaller
 
       - name: Download Cloudflared binary for macOS
         run: |
           curl -sSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz" -o cloudflared.tgz
-          tar -xzf cloudflared.tgz -C windows-app/
-          chmod +x windows-app/cloudflared
+          tar -xzf cloudflared.tgz -C Desktop-app/
+          chmod +x Desktop-app/cloudflared
 
       - name: Build macOS App & DMG
         run: |
-          pyinstaller --windowed --name "MusicPromoRepurposer" --collect-all imageio_ffmpeg --add-binary "windows-app/cloudflared:." windows-app/app.py
+          pyinstaller --windowed --name "MusicPromoRepurposer" --collect-all imageio_ffmpeg --add-binary "Desktop-app/cloudflared:." Desktop-app/app.py
           mkdir -p dmg_staging
           cp -R "dist/MusicPromoRepurposer.app" dmg_staging/
           ln -s /Applications dmg_staging/Applications
