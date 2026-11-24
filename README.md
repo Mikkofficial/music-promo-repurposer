@@ -22,5 +22,5 @@ Post once to TikTok and automatically share your clips to **YouTube Shorts**, **
 
 ## Included Features
 * **Watermark-Free H.264 + AAC:** Grabs top-quality video and audio streams.
-* **Separate Platform Analytics:** Uploads directly to each network so views stay tracked per platform.
-* **Instagram Trial Reels:** Tests clips with non-followers before pushing winners to your grid.
+* **Separate Platform Analytics:** Uploads directly to each network so Instagram and Facebook views stay seperate per platform.
+* **Instagram Trial Reels:** Option to automatically carry over trial reels to feed or do it manually.
