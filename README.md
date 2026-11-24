@@ -53,7 +53,7 @@ You only need to do this once. No business verification or company registration 
 ### Option 1: Desktop App (Windows & macOS)
 
 1. **Download the App:**
-   * Go to **[Latest Releases](https://github.com)** and download **`MusicPromoRepurposer-Windows.exe`** (Windows) or **`MusicPromoRepurposer-macOS.dmg`** (Mac).
+   * Go to **[Latest Releases](https://github.com/Mikkofficial/music-promo-repurposer/releases)** and download **`MusicPromoRepurposer-Windows.exe`** (Windows) or **`MusicPromoRepurposer-macOS.dmg`** (Mac).
 2. **First-Time Launch Warning:**
    * **Windows:** If SmartScreen appears, click **More info → Run anyway**.
    * **macOS:** Drag the app to *Applications*, then **Right-click → Open** on first launch (or allow it in *System Settings → Privacy & Security*).
