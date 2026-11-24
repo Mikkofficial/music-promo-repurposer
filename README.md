@@ -72,7 +72,7 @@ You only need to do this once. No business verification or company registration 
 2. **Run the 1-Command Installer:**
    * Connect to your server via SSH and run:
      ```bash
-     curl -sSL https://githubusercontent.com | bash
+     curl -sSL raw.githubusercontent.com/Mikkofficial/music-promo-repurposer/main/server/install.sh | bash
      ```
    * Enter your subdomain, TikTok username, Meta IDs, and Permanent Meta Page Token when prompted. Automatic HTTPS is configured out of the box.
 3. **Connect YouTube & Activate:**
