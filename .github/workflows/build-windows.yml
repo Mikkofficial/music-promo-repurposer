@@ -29,12 +29,12 @@ jobs:
       - name: Download FFmpeg & Cloudflared binaries
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://gyan.dev" -OutFile "ffmpeg.zip"
+          curl.exe -sSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o "ffmpeg.zip"
           Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_temp" -Force
           $ffmpegExe = Get-ChildItem -Path "ffmpeg_temp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
           Copy-Item $ffmpegExe.FullName -Destination "windows-app/ffmpeg.exe"
 
-          Invoke-WebRequest -Uri "https://github.com" -OutFile "windows-app/cloudflared.exe"
+          curl.exe -sSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -o "windows-app/cloudflared.exe"
 
       - name: Build single-file Windows EXE
         run: |
