@@ -79,3 +79,15 @@ You only need to do this once. No business verification or company registration 
    * Open `https://your-subdomain.com` in your browser and create your n8n admin login.
    * Open the pre-loaded **Music Promo Repurposer** workflow, open the **YouTube Upload** node, paste your Google **Client ID** and **Client Secret**, and click **Sign in with Google**.
    * Toggle the **Active** switch at the top of n8n to **ON** — your server now checks TikTok every 15 minutes 24/7.
+  
+
+     ---
+
+## Pro Tips for Maximum Audio & Video Quality (1080p HD)
+
+1. **Enable High-Quality Uploads in TikTok:** Before posting on TikTok, tap **More options** on the publish screen and toggle **Allow high-quality uploads** ON. Without this, TikTok compresses the file to 540p on its own servers.
+2. **Optional `cookies.txt` for Guaranteed 1080p:** TikTok sometimes restricts 1080p streams to logged-in sessions. You can export a `cookies.txt` file from a secondary TikTok account using the *Get cookies.txt LOCALLY* browser extension:
+   * **Desktop App:** Select your `cookies.txt` in the **Optional TikTok cookies.txt** field.
+   * **24/7 Server:** Place the file at `/home/node/.n8n/tiktok_cookies.txt` inside your n8n container—the workflow detects and uses it automatically.
+3. **Leave ~1.5 dB Headroom on Your Master:** TikTok and Instagram both apply loudness normalization during ingestion. Leaving -1.5 dBFS of headroom prevents audible limiter clipping on Reels and Shorts.
+
