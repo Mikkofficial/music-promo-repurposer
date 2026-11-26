@@ -1,5 +1,5 @@
 {
-  "name": "Music Promo Repurposer (1080p HD)",
+  "name": "Music Promo Repurposer (1080p HD + Auto-Comment)",
   "nodes": [
     {
       "parameters": {
@@ -14,17 +14,23 @@
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position":,
+      "position": [
+        0,
+        0
+      ],
       "id": "1a643ef8-2eb5-4bfb-a9f7-be45883b5440",
       "name": "Schedule Trigger"
     },
     {
       "parameters": {
-        "command": "USER=\"{{ $env.TIKTOK_USERNAME }}\"\nrm -f /home/node/.n8n-files/latest_tiktok.* /home/node/.n8n-files/raw_tiktok.*\nCOOKIE_ARG=\"\"\n[ -f /home/node/.n8n/tiktok_cookies.txt ] && COOKIE_ARG=\"--cookies /home/node/.n8n/tiktok_cookies.txt\"\n\nyt-dlp $COOKIE_ARG \\\n  --playlist-end 8 \\\n  --dateafter now-1day \\\n  --max-downloads 1 \\\n  --download-archive /home/node/.n8n/tiktok_history.txt \\\n  --write-info-json \\\n  --match-filter \"vcodec != none\" \\\n  -f \"best[height>=1080]/best[ext=mp4]/best\" \\\n  -o \"/home/node/.n8n-files/raw_tiktok.%(ext)s\" \\\n  \"https://tiktok.com\" || true\n\nif [ -f /home/node/.n8n-files/raw_tiktok.mp4 ]; then\n  mv /home/node/.n8n-files/raw_tiktok.info.json /home/node/.n8n-files/latest_tiktok.info.json\n  ffmpeg -y -i /home/node/.n8n-files/raw_tiktok.mp4 \\\n    -c:v libx264 -crf 17 -preset veryfast -pix_fmt yuv420p \\\n    -c:a aac -b:a 256k -movflags +faststart \\\n    /home/node/.n8n-files/latest_tiktok.mp4 || cp /home/node/.n8n-files/raw_tiktok.mp4 /home/node/.n8n-files/latest_tiktok.mp4\n  rm -f /home/node/.n8n-files/raw_tiktok.mp4\n  echo \"READY: latest_tiktok.mp4\"\nfi\n"
+        "command": "USER=\"{{ $env.TIKTOK_USERNAME }}\"\nrm -f /home/node/.n8n-files/latest_tiktok.* /home/node/.n8n-files/raw_tiktok.*\nCOOKIE_ARG=\"\"\n[ -f /home/node/.n8n/tiktok_cookies.txt ] && COOKIE_ARG=\"--cookies /home/node/.n8n/tiktok_cookies.txt\"\n\nyt-dlp $COOKIE_ARG \\\n  --playlist-end 8 \\\n  --dateafter now-1day \\\n  --max-downloads 1 \\\n  --download-archive /home/node/.n8n/tiktok_history.txt \\\n  --write-info-json \\\n  --match-filter \"vcodec != none\" \\\n  -f \"best[height>=1080]/best[ext=mp4]/best\" \\\n  -o \"/home/node/.n8n-files/raw_tiktok.%(ext)s\" \\\n  \"https://www.tiktok.com/@$USER\" || true\n\nif [ -f /home/node/.n8n-files/raw_tiktok.mp4 ]; then\n  mv /home/node/.n8n-files/raw_tiktok.info.json /home/node/.n8n-files/latest_tiktok.info.json\n  ffmpeg -y -i /home/node/.n8n-files/raw_tiktok.mp4 \\\n    -c:v libx264 -crf 17 -preset veryfast -pix_fmt yuv420p \\\n    -c:a aac -b:a 256k -movflags +faststart \\\n    /home/node/.n8n-files/latest_tiktok.mp4 || cp /home/node/.n8n-files/raw_tiktok.mp4 /home/node/.n8n-files/latest_tiktok.mp4\n  rm -f /home/node/.n8n-files/raw_tiktok.mp4\n  echo \"READY: latest_tiktok.mp4\"\nfi\n"
       },
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position":,
+      "position": [
+        220,
+        0
+      ],
       "id": "65bbe73e-bda8-4b7f-8285-f50a3ca1c864",
       "name": "Grab Video from TikTok"
     },
@@ -52,7 +58,10 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position":,
+      "position": [
+        440,
+        0
+      ],
       "id": "aeabe2de-c90d-4b49-b41b-fd05543abbfc",
       "name": "New Video Found?"
     },
@@ -62,7 +71,10 @@
       },
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
-      "position": [680, -120],
+      "position": [
+        680,
+        -100
+      ],
       "id": "21e68918-16d1-42d7-b236-5ac30ad15f88",
       "name": "Read Caption"
     },
@@ -73,7 +85,10 @@
       },
       "type": "n8n-nodes-base.readWriteFile",
       "typeVersion": 1,
-      "position": [900, -220],
+      "position": [
+        920,
+        -260
+      ],
       "id": "85eca065-fbe1-4bac-8476-10f38eefba2b",
       "name": "Read Video File"
     },
@@ -92,21 +107,77 @@
       },
       "type": "n8n-nodes-base.youTube",
       "typeVersion": 1,
-      "position": [1140, -220],
+      "position": [
+        1160,
+        -260
+      ],
       "id": "25454f39-bc13-4f00-b51f-e86bebb6b493",
       "name": "YouTube Upload"
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1-yt",
+              "leftValue": "={{ $env.AUTO_COMMENT }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        -260
+      ],
+      "id": "yt-if-comment-001",
+      "name": "Has YT Comment?"
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "=https://facebook.com{{ $env.IG_BUSINESS_ID }}/media",
+        "url": "https://www.googleapis.com/youtube/v3/commentThreads?part=snippet",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ snippet: { videoId: $json.id, topLevelComment: { snippet: { textOriginal: $env.AUTO_COMMENT } } } }) }}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1640,
+        -280
+      ],
+      "id": "yt-post-comment-002",
+      "name": "YT Post Auto-Comment"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $env.IG_BUSINESS_ID }}/media",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  media_type: \"REELS\",\n  video_url: \"https://\" + $env.DOMAIN + \"/webhook/latest-video\",\n  caption: JSON.parse($('Read Caption').item.json.stdout).desc || \"New Music!\",\n  trial_params: {\n    graduation_strategy: \"SS_PERFORMANCE\"\n  },\n  access_token: $env.META_PAGE_TOKEN\n}) }}\n"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position":,
+      "position": [
+        920,
+        -20
+      ],
       "id": "16e2101c-be68-4b50-9f1b-6e395a180b27",
       "name": "IG Create Trial Reel"
     },
@@ -116,14 +187,17 @@
       },
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position":,
+      "position": [
+        1160,
+        -20
+      ],
       "id": "9535ea4a-1eb1-4ca2-887e-3235a46c08d8",
       "name": "Wait 60s"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://facebook.com{{ $env.IG_BUSINESS_ID }}/media_publish",
+        "url": "=https://graph.facebook.com/v21.0/{{ $env.IG_BUSINESS_ID }}/media_publish",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -140,14 +214,75 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position":,
+      "position": [
+        1400,
+        -20
+      ],
       "id": "2d89f2d8-fa27-4029-82c3-f7f4c2a04d97",
       "name": "IG Publish Trial Reel"
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1-ig",
+              "leftValue": "={{ $env.AUTO_COMMENT }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        -20
+      ],
+      "id": "ig-if-comment-001",
+      "name": "Has IG Comment?"
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "=https://facebook.com{{ $env.FB_PAGE_ID }}/videos",
+        "url": "=https://graph.facebook.com/v21.0/{{ $json.id }}/comments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $env.AUTO_COMMENT }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_PAGE_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1880,
+        -40
+      ],
+      "id": "ig-post-comment-002",
+      "name": "IG Post Auto-Comment"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph-video.facebook.com/v21.0/{{ $env.FB_PAGE_ID }}/videos",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -168,9 +303,70 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position":,
+      "position": [
+        920,
+        220
+      ],
       "id": "fb89f2d8-fa27-4029-82c3-f7f4c2a04d99",
       "name": "FB Page Upload"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1-fb",
+              "leftValue": "={{ $env.AUTO_COMMENT }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        220
+      ],
+      "id": "fb-if-comment-001",
+      "name": "Has FB Comment?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v21.0/{{ $json.id }}/comments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $env.AUTO_COMMENT }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_PAGE_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1400,
+        200
+      ],
+      "id": "fb-post-comment-002",
+      "name": "FB Post Auto-Comment"
     },
     {
       "parameters": {
@@ -180,7 +376,10 @@
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position":,
+      "position": [
+        0,
+        320
+      ],
       "id": "wh89f2d8-fa27-4029-82c3-f7f4c2a04d11",
       "name": "Video Host Webhook",
       "webhookId": "latest-video-host"
@@ -192,39 +391,182 @@
       },
       "type": "n8n-nodes-base.readWriteFile",
       "typeVersion": 1,
-      "position":,
+      "position": [
+        240,
+        320
+      ],
       "id": "wh89f2d8-fa27-4029-82c3-f7f4c2a04d12",
       "name": "Serve MP4 File"
     }
   ],
   "connections": {
     "Schedule Trigger": {
-      "main": [[{ "node": "Grab Video from TikTok", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Grab Video from TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Grab Video from TikTok": {
-      "main": [[{ "node": "New Video Found?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "New Video Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "New Video Found?": {
-      "main": [[{ "node": "Read Caption", "type": "main", "index": 0 }], []]
+      "main": [
+        [
+          {
+            "node": "Read Caption",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
     },
     "Read Caption": {
-      "main": [[
-        { "node": "Read Video File", "type": "main", "index": 0 },
-        { "node": "IG Create Trial Reel", "type": "main", "index": 0 },
-        { "node": "FB Page Upload", "type": "main", "index": 0 }
-      ]]
+      "main": [
+        [
+          {
+            "node": "Read Video File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IG Create Trial Reel",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FB Page Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Read Video File": {
-      "main": [[{ "node": "YouTube Upload", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "YouTube Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Upload": {
+      "main": [
+        [
+          {
+            "node": "Has YT Comment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has YT Comment?": {
+      "main": [
+        [
+          {
+            "node": "YT Post Auto-Comment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
     },
     "IG Create Trial Reel": {
-      "main": [[{ "node": "Wait 60s", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Wait 60s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Wait 60s": {
-      "main": [[{ "node": "IG Publish Trial Reel", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "IG Publish Trial Reel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IG Publish Trial Reel": {
+      "main": [
+        [
+          {
+            "node": "Has IG Comment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has IG Comment?": {
+      "main": [
+        [
+          {
+            "node": "IG Post Auto-Comment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "FB Page Upload": {
+      "main": [
+        [
+          {
+            "node": "Has FB Comment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has FB Comment?": {
+      "main": [
+        [
+          {
+            "node": "FB Post Auto-Comment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
     },
     "Video Host Webhook": {
-      "main": [[{ "node": "Serve MP4 File", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Serve MP4 File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false
