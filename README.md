@@ -81,7 +81,7 @@ You only need to do this once. No business verification or company registration 
    * Toggle the **Active** switch at the top of n8n to **ON** — your server now checks TikTok every 15 minutes 24/7.
   
 
-     ---
+---
 
 ## Pro Tips for Maximum Audio & Video Quality (1080p HD)
 
@@ -90,4 +90,10 @@ You only need to do this once. No business verification or company registration 
    * **Desktop App:** Select your `cookies.txt` in the **Optional TikTok cookies.txt** field.
    * **24/7 Server:** Place the file at `/home/node/.n8n/tiktok_cookies.txt` inside your n8n container—the workflow detects and uses it automatically.
 3. **Leave ~1.5 dB Headroom on Your Master:** TikTok and Instagram both apply loudness normalization during ingestion. Leaving -1.5 dBFS of headroom prevents audible limiter clipping on Reels and Shorts.
+
+---
+
+## Auto-Comment
+
+ * *(Optional)* Enter an **Auto-Comment** (such as your Spotify, Apple Music, or Pre-save link) — the app will automatically post it as the first comment on YouTube Shorts, Instagram Reels, and Facebook Reels.
 
